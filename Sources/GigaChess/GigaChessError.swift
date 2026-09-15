@@ -19,6 +19,7 @@ public enum GigaChessError: Error, Sendable, Hashable, CustomStringConvertible {
     /// Movetext/codec/replay failure at the given ply index.
     case codecFailed(ply: Int)
 
+    /// Human-readable description.
     public var description: String {
         switch self {
         case .invalidFen(let detail):

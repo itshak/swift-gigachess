@@ -53,24 +53,35 @@ struct BoardStorage: Sendable {
 
 /// Side to move. Raw values match the engine (Black = 0, White = 1).
 public enum Color: UInt8, Sendable, Hashable, CustomStringConvertible {
+    /// Black to move.
     case black = 0
+    /// White to move.
     case white = 1
 
+    /// `"w"` or `"b"`.
     public var description: String { self == .white ? "w" : "b" }
 
+    /// The opposite color.
     public var other: Color { self == .white ? .black : .white }
 }
 
 /// Piece role. Discriminants match the moves2 promo nibble
 /// (0 = pawn/none, 1 = N, 2 = B, 3 = R, 4 = Q, 5 = king).
 public enum Role: UInt8, Sendable, Hashable, CustomStringConvertible {
+    /// Pawn (moves2 promo 0 / none).
     case pawn = 0
+    /// Knight (moves2 promo 1).
     case knight = 1
+    /// Bishop (moves2 promo 2).
     case bishop = 2
+    /// Rook (moves2 promo 3).
     case rook = 3
+    /// Queen (moves2 promo 4).
     case queen = 4
+    /// King (never a promotion).
     case king = 5
 
+    /// Uppercase piece letter.
     public var description: String {
         switch self {
         case .pawn: return "P"
@@ -85,9 +96,12 @@ public enum Role: UInt8, Sendable, Hashable, CustomStringConvertible {
 
 /// A colored piece.
 public struct Piece: Hashable, Equatable, Sendable, CustomStringConvertible {
+    /// Piece color.
     public let color: Color
+    /// Piece role.
     public let role: Role
 
+    /// Creates a piece from color and role.
     public init(color: Color, role: Role) {
         self.color = color
         self.role = role
@@ -103,6 +117,7 @@ public struct Piece: Hashable, Equatable, Sendable, CustomStringConvertible {
         return Piece(color: color, role: role)
     }
 
+    /// FEN-style letter (uppercase for White, lowercase for Black).
     public var description: String {
         let c = role.description
         return color == .white ? c : c.lowercased()

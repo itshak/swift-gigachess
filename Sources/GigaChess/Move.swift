@@ -8,11 +8,16 @@ import CGigaChessFFI
 
 /// Promotion piece (moves2 promo nibble).
 public enum Promotion: UInt16, Sendable, Hashable, CustomStringConvertible {
+    /// Knight (promo 1).
     case knight = 1
+    /// Bishop (promo 2).
     case bishop = 2
+    /// Rook (promo 3).
     case rook = 3
+    /// Queen (promo 4).
     case queen = 4
 
+    /// Lowercase UCI promotion letter.
     public var description: String {
         switch self {
         case .knight: return "n"
@@ -73,6 +78,7 @@ public struct Move: Hashable, Equatable, Sendable, CustomStringConvertible {
         return s
     }
 
+    /// UCI rendering (same as `uci`).
     public var description: String { uci }
 
     /// Algebraic square name (e4) for a 0…63 index (a1 = 0, h8 = 63).
