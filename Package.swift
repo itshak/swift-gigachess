@@ -6,11 +6,10 @@ import PackageDescription
 // Engine pin (must match scripts/build-xcframework.sh GIGACHESS_VERSION).
 let gigachessVersion = "0.1.2"
 let ffiReleaseTag = "gigachess-ffi-0.1.2-1"
-// Checksum placeholder: replaced by scripts/build-xcframework.sh output after
-// uploading CGigaChessFFI.xcframework.zip to the GitHub Release below.
-// Run `swift package compute-checksum Frameworks/CGigaChessFFI.xcframework.zip`
-// and paste the result here before tagging a consumer release.
-let ffiChecksum = "0000000000000000000000000000000000000000000000000000000000000000"
+// Checksum of CGigaChessFFI.xcframework.zip attached to the Release below
+// (first published from CI run 35036281698). Refresh from
+// scripts/build-xcframework.sh output whenever the pin changes.
+let ffiChecksum = "197f79eb9fa4e8c6b847917f572c03a15ee82f4ffe649d7d6500561e06323f85"
 
 let package = Package(
     name: "GigaChess",
