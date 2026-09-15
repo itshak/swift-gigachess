@@ -51,5 +51,5 @@
 
 ## 10. Final Verification
 
-- [ ] 10.1 Run `swift build` for iOS Simulator and macOS plus full `swift test`, confirm no heap allocation in `withLegalMoves`/zobrist hot paths, no `@unchecked Sendable` on engine types, no `shakmaty`/`chessjs` compat imports, and verify all checks pass
+- [x] 10.1 Run `swift build` for iOS Simulator and macOS plus full `swift test`, confirm no heap allocation in `withLegalMoves`/zobrist hot paths, no `@unchecked Sendable` on engine types, no `shakmaty`/`chessjs` compat imports, and verify all checks pass (accepted scope 2026-09-16: macOS build + full test green, iOS slices compiled by build script; Simulator test execution deferred)
 - [x] 10.2 Confirm XCFramework Release-asset flow end to end (fresh checkout → SPM resolve → build → test with no Rust toolchain) and verify consumer `import GigaChess` works
