@@ -24,9 +24,14 @@ The build pipeline MUST produce an XCFramework containing all target architectur
 - **THEN** it is uploaded to a GitHub Release and referenced from SPM `binaryTarget` by URL + checksum
 - **THEN** the script prints the zip checksum plus Release-tag upload instructions for `Package.swift`
 
+#### Scenario: Bootstrap before first publish
+- **WHEN** `Package.swift` still carries the zero placeholder checksum (Release asset unpublished, so URL resolution 404s)
+- **THEN** CI swaps the `CGigaChessFFI` binary target to the locally-built `Frameworks/CGigaChessFFI.xcframework` path for that job only (`scripts/use-local-xcframework.sh`), so `swift build`/`swift test` exercise the freshly built artifact
+
 #### Scenario: First publish fills the checksum
 - **WHEN** the XCFramework zip is uploaded to its Release tag for the first time
-- **THEN** the zero placeholder checksum in `Package.swift` is replaced with the script-printed checksum (until then SPM resolution of the binary target fails)
+- **THEN** the zero placeholder checksum in `Package.swift` is replaced with the script-printed checksum
+- **THEN** subsequent jobs keep the URL target and verify the exact consumer resolution path (the bootstrap swap becomes a no-op)
 
 ### Requirement: SPM Integration
 The package MUST be consumable via Swift Package Manager using a Git URL, with no Rust toolchain required on the consumer side.

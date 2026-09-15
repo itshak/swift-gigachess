@@ -68,6 +68,8 @@ jobs:
           test "${SWIFT_VER%%.*}" -ge 6 || { echo "error: Swift 6+ required (Package.swift uses tools-version 6.0), got $SWIFT_VER" >&2; exit 1; }
       - name: Build XCFramework from pin (or download Release asset)
         run: ./scripts/build-xcframework.sh
+      - name: Use local XCFramework (bootstrap until Release published)
+        run: ./scripts/use-local-xcframework.sh
       - name: Upload XCFramework build artifact
         uses: actions/upload-artifact@v4
         with:
