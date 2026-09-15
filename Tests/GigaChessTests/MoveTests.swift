@@ -26,8 +26,7 @@ final class MoveTests: XCTestCase {
 
     func testPackingRoundTripAllWords() {
         // Every 16-bit word preserves from/to; promo nibble 0..4 decodes, 5..15 is none.
-        for w in 0..<65536 as UInt32 {
-            let word = UInt16(w)
+        for word in UInt16.min...UInt16.max {
             let m = Move(word: word)
             XCTAssertEqual(m.from, UInt8(word & 0x3F))
             XCTAssertEqual(m.to, UInt8((word >> 6) & 0x3F))

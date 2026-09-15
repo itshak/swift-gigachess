@@ -47,7 +47,7 @@ final class BoardTests: XCTestCase {
     }
 
     func testCopyIndependence() throws {
-        var original = Board()
+        let original = Board()
         var copy = original // bit-for-bit snapshot
         let e2e4 = Move(from: 12, to: 28)
         _ = try copy.play(e2e4)
