@@ -23,21 +23,21 @@ Existing Swift chess libraries (ChessKit) reimplement movegen in pure Swift. We 
 
 ### Decision 1: Raw C-ABI over UniFFI
 
-**Choice:** `extern "C"` functions with a C bridging header (new `ffi.rs` module in the Rust crate; upstream contribution or pinned patch, version-recorded).
+**Choice:** `extern "C"` functions with a C bridging header (a local `rust/` shim crate, `gigachess-ffi`, depending on `gigachess = "=0.1.2"` with `crate-type = ["staticlib", "rlib"]`; upstreaming `ffi.rs` into `gigachess-rs` remains an option, version-recorded).
 
-**Rationale:** UniFFI adds serialization + handle-map overhead per call. For bulk analysis (perft, search, batch replay with millions of calls) raw C-ABI compiles to a direct call. The glue cost (~50 lines Rust + ~15 lines C header + thin Swift) is minimal and stays in sync via CI.
+**Rationale:** UniFFI adds serialization + handle-map overhead per call. For bulk analysis (perft, search, batch replay with millions of calls) raw C-ABI compiles to a direct call. The glue cost (~790 lines Rust incl. tests + ~110-line C header + thin Swift) is minimal and stays in sync via CI.
 
 **Alternative considered:** UniFFI — rejected for per-call overhead and because our types are already FFI-friendly (`u16` moves, `u64` hashes, `#[repr(C)]` board).
 
 ### Decision 2: Board as a Swift value struct (not an opaque pointer)
 
-**Choice:** `Board` is a Swift `struct` holding the Rust board **by value** (144-byte `#[repr(C)]` struct, `Copy` on the Rust side). Copying a board is a bit-for-bit snapshot for search stacks — exactly how the Rust engine itself is used.
+**Choice:** `Board` is a Swift `struct` holding opaque 144-byte caller-owned storage (`GigaBoard`, same size as the `Copy` Rust board). Transfer is byte copies via pointer — never a language-level struct value — so copying a board is still a bit-for-bit snapshot for search stacks, exactly how the Rust engine itself is used, with zero field-offset coupling.
 
 **Rationale:** The engine's own architecture (ADR-013, close-gap D3) centers on a small `Copy` board with zero-allocation movegen. An opaque-pointer class would add `malloc`/`free` per position, a pointer chase per call, and an `@unchecked Sendable` lie on a mutable handle. The value struct is faster, truly `Sendable`, and gives snapshot semantics for free (undo = keep the old struct).
 
 **Alternative considered:** Opaque pointer + `final class` + `deinit` free — rejected: slower, heap-dependent, concurrency-hostile. There is no Rust allocation to free in this design, so the entire memory-safety section of the old spec collapses to "don't hold stale pointers across calls," enforced by value semantics.
 
-**Drift guard:** a layout test asserts `BOARD_SIZE` and field offsets against the pinned `gigachess` version; CI fails the build on mismatch so struct drift is caught, not shipped.
+**Drift guard:** a layout test asserts `BOARD_SIZE`/`UNDO_SIZE` against the pinned `gigachess` version (field offsets are N/A — opaque bytes); CI fails the build on mismatch so struct drift is caught, not shipped.
 
 ### Decision 3: Move as packed UInt16 value type
 
@@ -82,4 +82,4 @@ Existing Swift chess libraries (ChessKit) reimplement movegen in pure Swift. We 
 - **Struct layout drift**: Rust `Board` internals may change between engine versions. → Mitigated by `BOARD_SIZE`/offset assert test + version-sync CI (Decision 2, 8).
 - **FFI surface growth**: full native mirror means more entry points than a minimal wrapper. → Mitigated by 1:1 naming with Rust (`board_play`, `board_legal_moves`, …) so audits are mechanical.
 - **Swift 6 strict concurrency**: new requirement vs old `@unchecked Sendable` plan. → Value semantics make this free; CI builds with Swift 6 mode to keep it that way.
-- **Upstream dependency**: `ffi.rs` ideally lives upstream in `gigachess-rs`; until merged, a pinned patch/vendor copy with recorded hash. → Track upstream PR in tasks.
+- **Upstream dependency**: `ffi.rs` ideally lives upstream in `gigachess-rs`; as built, the shim lives in-repo under `rust/` instead, so there is no pending upstream PR to track. Upstreaming stays optional. → No action; recorded here so a future bump re-evaluates it.

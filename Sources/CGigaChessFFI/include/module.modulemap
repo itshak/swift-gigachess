@@ -1,0 +1,4 @@
+module CGigaChessFFI {
+    header "gigachess_ffi.h"
+    export *
+}

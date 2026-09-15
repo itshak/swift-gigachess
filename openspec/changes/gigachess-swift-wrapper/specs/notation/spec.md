@@ -26,14 +26,25 @@ The library MUST parse SAN strings to moves against a given board, mirroring nat
 
 #### Scenario: Parse SAN
 - **WHEN** a valid SAN string is parsed against its board
-- **THEN** the corresponding `Move` is returned
+- **THEN** the corresponding `Move` is returned (also available as `Move(parsing:on:)`)
 - **WHEN** the SAN is invalid or illegal in that position
-- **THEN** a `GigaChessError` is thrown
+- **THEN** direct parsing throws `GigaChessError.sanParseFailed` carrying the offending token
+
+### Requirement: SAN Sequence Play
+The library MUST play an ordered sequence of SAN tokens, returning one `Undo` per ply and identifying the first failing token by index.
+
+#### Scenario: Play sequence
+- **WHEN** SAN tokens are played in order via `playSan(_:)`
+- **THEN** one `Undo` per ply is returned (a variadic spelling is also available)
+
+#### Scenario: Bad token reports ply
+- **WHEN** the token at index `i` is invalid or illegal in its position
+- **THEN** `GigaChessError.codecFailed(ply: i)` is thrown
 
 ### Requirement: String Data Transfer
 FEN/SAN strings MUST be copied across the FFI boundary into caller-owned buffers. The Rust side MUST NEVER allocate a string that Swift must free.
 
 #### Scenario: No shared pointers
 - **WHEN** a FEN or SAN string crosses from Rust
-- **THEN** the data is copied into a Swift-owned stack buffer (FEN ≤ 96 bytes, SAN ≤ 12 bytes)
+- **THEN** the data is copied into a Swift-owned temporary buffer under the contract FEN ≤ 96 bytes + NUL, SAN ≤ 12 bytes + NUL (Rust always NUL-terminates when capacity > 0 and returns `BUFFER_TOO_SMALL` otherwise)
 - **THEN** the Rust side retains no reference to the Swift buffer

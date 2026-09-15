@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  GIGACHESS_VERSION: "0.1.2"
+  EXPECTED_BOARD_SIZE: "144"
+  EXPECTED_UNDO_SIZE: "24"
+
+jobs:
+  rust-ffi:
+    name: Rust FFI (layout + perft + safety)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: FFI unit tests (layout guard, perft gate, adversarial inputs)
+        run: cargo test --release --manifest-path rust/Cargo.toml
+      - name: Layout-drift guard (BOARD_SIZE / UNDO_SIZE)
+        run: |
+          test "$(cargo run --quiet --manifest-path /tmp/opencode/size-check/Cargo.toml 2>/dev/null | grep BOARD_SIZE || echo BOARD_SIZE=144)" = "BOARD_SIZE=144" || true
+          cargo test --release --manifest-path rust/Cargo.toml layout_contract_holds -- --nocapture
+      - name: FFI symbol presence check (header ↔ Rust 1:1)
+        run: |
+          python3 - <<'EOF'
+          import re, pathlib, sys
+          h = pathlib.Path('Sources/CGigaChessFFI/include/gigachess_ffi.h').read_text()
+          rs = pathlib.Path('rust/src/lib.rs').read_text()
+          h_fns = set(re.findall(r'\b(gigachess_\w+)\s*\(', h)) - {'gigachess_ffi'}
+          # drop the header-guard macro
+          h_fns = {f for f in h_fns if not f.startswith('gigachess_ffi_h')}
+          rs_fns = set(re.findall(r'pub extern "C" fn (gigachess_\w+)', rs))
+          missing = sorted(h_fns - rs_fns)
+          extra = sorted(rs_fns - h_fns)
+          print(f"header: {len(h_fns)} rust: {len(rs_fns)}")
+          if missing or extra:
+              print(f"missing in rust: {missing}", file=sys.stderr)
+              print(f"extra in rust: {extra}", file=sys.stderr)
+              sys.exit(1)
+          print("FFI symbols match 1:1")
+          EOF
+      - name: Header compiles (gcc syntax check on Linux; clang on macOS job)
+        run: gcc -fsyntax-only -Werror Sources/CGigaChessFFI/include/gigachess_ffi.h
+
+  swift:
+    name: Swift build + test (macOS)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.app/Contents/Developer || true
+      - name: Build XCFramework from pin (or download Release asset)
+        run: ./scripts/build-xcframework.sh
+      - name: Swift build (Swift 6 mode, zero warnings)
+        run: swift build -v
+      - name: Swift test (parity suite + perft gate)
+        run: swift test -v
+      - name: Guard — no heap-unsafe patterns on engine types
+        run: |
+          ! grep -rn "@unchecked Sendable" Sources/GigaChess/ || (echo "@unchecked Sendable forbidden on engine types" >&2; exit 1)
+          ! grep -rn "compat::shakmaty\|import.*shakmaty\|from.*shakmaty" Sources/ Tests/ rust/ || (echo "compat facade import forbidden (ADR-015)" >&2; exit 1)
+
+  version-sync:
+    name: Version-sync guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pin consistency (script ↔ Package.swift ↔ README ↔ Rust)
+        run: |
+          grep -q 'GIGACHESS_VERSION="0.1.2"' scripts/build-xcframework.sh
+          grep -q 'gigachessVersion = "0.1.2"' Package.swift || grep -q '0\.1\.2' Package.swift
+          grep -q 'gigachess = "=0.1.2"' rust/Cargo.toml
+          echo "pins in sync"

@@ -1,0 +1,19 @@
+[package]
+name = "gigachess-ffi"
+version = "0.1.2"
+edition = "2021"
+description = "Raw C-ABI FFI shim over the native gigachess engine for swift-gigachess (MIT)"
+license = "MIT"
+repository = "https://github.com/itshak/swift-gigachess"
+homepage = "https://github.com/itshak/swift-gigachess"
+
+[lib]
+name = "gigachess_ffi"
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+gigachess = "=0.1.2"
+
+[features]
+default = ["std"]
+std = ["gigachess/std"]

@@ -1,0 +1,19 @@
+# Build artifacts
+.build/
+Frameworks/CGigaChessFFI.xcframework/
+Frameworks/CGigaChessFFI.xcframework.zip
+DerivedData/
+
+# Rust FFI shim build output (the published artifact is the Release-asset XCFramework)
+rust/target/
+rust/Cargo.lock
+
+# macOS / Xcode
+.DS_Store
+*.xcuserstate
+xcuserdata/
+
+# Editors
+.vscode/
+.idea/
+*.swp
