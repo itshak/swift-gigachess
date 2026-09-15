@@ -82,8 +82,10 @@ jobs:
         run: swift test -v
       - name: Guard — no heap-unsafe patterns on engine types
         run: |
-          ! grep -rn "@unchecked Sendable" Sources/GigaChess/ || (echo "@unchecked Sendable forbidden on engine types" >&2; exit 1)
-          ! grep -rn "compat::shakmaty\|import.*shakmaty\|from.*shakmaty" Sources/ Tests/ rust/ || (echo "compat facade import forbidden (ADR-015)" >&2; exit 1)
+          ! grep -rnI "@unchecked Sendable" Sources/GigaChess/ || (echo "@unchecked Sendable forbidden on engine types" >&2; exit 1)
+          # NOTE: source dirs only — rust/target/ holds compiled engine
+          # artifacts that legitimately embed compat::shakmaty strings.
+          ! grep -rnI "compat::shakmaty\|import.*shakmaty\|from.*shakmaty" Sources/ Tests/ rust/src/ rust/Cargo.toml || (echo "compat facade import forbidden (ADR-015)" >&2; exit 1)
 
   version-sync:
     name: Version-sync guard
