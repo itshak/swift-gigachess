@@ -33,9 +33,13 @@ The library MUST support creating positions from the standard starting position,
 - **WHEN** boards are created, copied, or passed across the FFI boundary
 - **THEN** board transfer and copying move bytes only — no board memory is heap-allocated, retained, or freed on either side (Swift zero-fills caller-owned storage before each FFI constructor call; Rust copies bytes in/out)
 
-#### Scenario: Bit-for-bit equality
+#### Scenario: Bit-for-bit snapshots
+- **WHEN** a board is copied (assignment or parameter passing)
+- **THEN** the copy is an independent byte-wise snapshot — playing a move on the copy leaves the original untouched
+
+#### Scenario: Equality compares observable state, not raw bytes
 - **WHEN** two boards are compared
-- **THEN** equality is byte-wise over the 144-byte storage, and `Hashable` combines the incrementally-maintained Zobrist key
+- **THEN** equality covers turn, all 64 squares, castling rights, en-passant, clocks, and the Zobrist key — never raw storage bytes (Rust padding bytes are uninitialized and differ between identical constructions, as CI caught), and `Hashable` combines the Zobrist key
 
 ### Requirement: Position Queries
 The library MUST expose native board queries: side to move, piece at square, king square, castling rights, en-passant square, halfmove clock, and fullmove number.

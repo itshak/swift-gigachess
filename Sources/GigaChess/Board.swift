@@ -312,15 +312,25 @@ public struct Board: Sendable {
     }
 }
 
-// MARK: - Equatable (bit-for-bit incl. hash)
+// MARK: - Equatable (observable state, never raw bytes)
 
 extension Board: Equatable {
     public static func == (lhs: Board, rhs: Board) -> Bool {
-        withUnsafeBytes(of: lhs.storage) { l in
-            withUnsafeBytes(of: rhs.storage) { r in
-                l.elementsEqual(r)
-            }
+        // Raw storage bytes MUST NOT be compared: Rust padding bytes
+        // (e.g. byte 137 between `ep` and `halfmove`) are uninitialized and
+        // differ between identical constructions. Compare the full
+        // observable state instead. Not a hot path — search compares
+        // Zobrist keys, which are part of the comparison below.
+        guard lhs.turn == rhs.turn,
+              lhs.castlingRights == rhs.castlingRights,
+              lhs.enPassant == rhs.enPassant,
+              lhs.halfmoveClock == rhs.halfmoveClock,
+              lhs.fullmoveNumber == rhs.fullmoveNumber,
+              lhs.zobrist == rhs.zobrist else { return false }
+        for sq: UInt8 in 0..<64 {
+            if lhs.piece(at: sq) != rhs.piece(at: sq) { return false }
         }
+        return true
     }
 }
 

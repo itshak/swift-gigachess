@@ -44,7 +44,7 @@ The library MUST support `play` (failable, legality-checked, mirroring native `p
 
 #### Scenario: Make/unmake round-trip
 - **WHEN** a move is made with `makeMoveUnchecked` and then unmade with its `Undo` token
-- **THEN** the board is bit-identical to its pre-move state (hash included)
+- **THEN** the board equals its pre-move state across all observable state plus the hash (`==` is state-wise: raw storage bytes are excluded because Rust padding is uninitialized)
 
 #### Scenario: Unchecked make skips legality
 - **WHEN** a move is made with `makeMoveUnchecked`
