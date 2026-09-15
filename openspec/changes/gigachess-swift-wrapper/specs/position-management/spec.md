@@ -23,7 +23,7 @@ The library MUST support creating positions from the standard starting position,
 - **THEN** the initializer throws a `GigaChessError.invalidFen` (with Rust-provided detail where available), instead of trapping or returning a corrupt board
 
 ### Requirement: Value Semantics and Snapshots
-`Board` MUST be a Swift `struct` holding 144-byte caller-owned board storage (`GigaBoard`, same size as the native `Copy` Rust board). Assignment and parameter passing MUST copy the bytes, producing independent bit-for-bit snapshots suitable for search stacks and undo-by-copy. The board NEVER crosses FFI as a language-level struct value: Rust copies bytes in and out of caller-owned storage via pointer, so no field-offset coupling exists between Swift and Rust.
+`Board` MUST be a Swift `struct` holding Swift-owned 144-byte storage (`BoardStorage`, 18 × `UInt64`, layout-identical to the native `Copy` Rust board). Assignment and parameter passing MUST copy the bytes, producing independent bit-for-bit snapshots suitable for search stacks and undo-by-copy. Every FFI call bridges through scoped pointer rebinding (`withGigaBoard`), so the board NEVER crosses FFI as a language-level struct value and no field-offset coupling exists between Swift and Rust.
 
 #### Scenario: Copy independence
 - **WHEN** a board is copied and a move is played on the copy
@@ -54,3 +54,7 @@ The library MUST expose native board queries: side to move, piece at square, kin
 #### Scenario: Concurrent search
 - **WHEN** board copies are searched on concurrent tasks
 - **THEN** behavior is well-defined with no data races
+
+#### Scenario: No unchecked or retroactive conformances
+- **WHEN** the package builds under Swift 6 strict concurrency
+- **THEN** `Sendable` holds by compiler checking for every engine type, with no `@unchecked Sendable` and no retroactive conformance on imported C types (the storage types are declared in Swift, so checking applies; CI fails the build otherwise)

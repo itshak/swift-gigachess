@@ -8,23 +8,25 @@ extension Board {
     /// Render a legal move in canonical SAN (disambiguation, check/mate
     /// suffixes, letter-O castling). Throws `.illegalMove` for illegal input.
     public func san(for move: Move) throws -> String {
-        var copy = storage
-        return try withUnsafeTemporaryAllocation(of: CChar.self, capacity: 32) { buf in
-            guard let base = buf.baseAddress else { throw GigaChessError.enginePanicked }
-            var outLen = 0
-            let status = gigachess_board_move_to_san(&copy, move.word, base, buf.count, &outLen)
-            if let err = GigaChessError.fromStatus(status) { throw err }
-            return String(cString: base)
+        try storage.withGigaBoard { boardPtr in
+            try withUnsafeTemporaryAllocation(of: CChar.self, capacity: 32) { buf in
+                guard let base = buf.baseAddress else { throw GigaChessError.enginePanicked }
+                var outLen = 0
+                let status = gigachess_board_move_to_san(boardPtr, move.word, base, buf.count, &outLen)
+                if let err = GigaChessError.fromStatus(status) { throw err }
+                return String(cString: base)
+            }
         }
     }
 
     /// Parse a SAN token against this position. Accepts both `O-O` and `0-0`
     /// castling spellings (plus `+`/`#`/`!`/`?` suffixes, `=Q` promotion).
     public func move(fromSan san: String) throws -> Move {
-        var copy = storage
         var word: UInt16 = 0
-        let status: Int32 = san.withCString { sanPtr in
-            gigachess_board_san_to_move(&copy, sanPtr, &word)
+        let status: Int32 = storage.withGigaBoard { boardPtr in
+            san.withCString { sanPtr in
+                gigachess_board_san_to_move(boardPtr, sanPtr, &word)
+            }
         }
         if let err = GigaChessError.fromStatus(status, token: san) { throw err }
         return Move(word: word)

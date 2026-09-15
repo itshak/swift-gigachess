@@ -1,6 +1,8 @@
 // Board.swift — value-type chess position over the native `gigachess` engine.
-// `Board` is a Swift struct holding the 144-byte Copy Rust board by value:
-// assignment and parameter passing snapshot bit-for-bit (search-stack safe).
+// `Board` is a Swift struct holding Swift-owned 144-byte storage
+// (layout-identical to the Copy Rust board): assignment and parameter passing
+// snapshot bit-for-bit (search-stack safe). All FFI traffic bridges through
+// scoped pointer rebinding, so Swift 6 `Sendable` holds by checking.
 // No heap allocation, no deinit/free, no opaque-pointer handles.
 //
 // Hot paths are zero-alloc: `withLegalMoves` (visitor), caller-owned FEN/SAN
@@ -9,6 +11,45 @@
 //
 // SPDX-License-Identifier: MIT
 import CGigaChessFFI
+
+/// Swift-owned 144-byte board storage, layout-identical to `GigaBoard`
+/// (18 × UInt64, no padding possible). Every FFI call bridges through the
+/// scoped helpers below — never a language-level struct value — so there is
+/// zero field-offset coupling between Swift and Rust.
+struct BoardStorage: Sendable {
+    var w00: UInt64 = 0
+    var w01: UInt64 = 0
+    var w02: UInt64 = 0
+    var w03: UInt64 = 0
+    var w04: UInt64 = 0
+    var w05: UInt64 = 0
+    var w06: UInt64 = 0
+    var w07: UInt64 = 0
+    var w08: UInt64 = 0
+    var w09: UInt64 = 0
+    var w10: UInt64 = 0
+    var w11: UInt64 = 0
+    var w12: UInt64 = 0
+    var w13: UInt64 = 0
+    var w14: UInt64 = 0
+    var w15: UInt64 = 0
+    var w16: UInt64 = 0
+    var w17: UInt64 = 0
+
+    /// Scoped read-only access as `GigaBoard`.
+    func withGigaBoard<R>(_ body: (UnsafePointer<GigaBoard>) throws -> R) rethrows -> R {
+        try withUnsafePointer(to: self) {
+            try $0.withMemoryRebound(to: GigaBoard.self, capacity: 1, body)
+        }
+    }
+
+    /// Scoped mutable access as `GigaBoard`.
+    mutating func withMutableGigaBoard<R>(_ body: (UnsafeMutablePointer<GigaBoard>) throws -> R) rethrows -> R {
+        try withUnsafeMutablePointer(to: &self) {
+            try $0.withMemoryRebound(to: GigaBoard.self, capacity: 1, body)
+        }
+    }
+}
 
 /// Side to move. Raw values match the engine (Black = 0, White = 1).
 public enum Color: UInt8, Sendable, Hashable, CustomStringConvertible {
@@ -70,18 +111,18 @@ public struct Piece: Hashable, Equatable, Sendable, CustomStringConvertible {
 
 /// A chess position (144-byte value snapshot).
 public struct Board: Sendable {
-    var storage: GigaBoard
+    var storage: BoardStorage
 
     // MARK: - Construction
 
-    init(storage: GigaBoard) {
+    init(storage: BoardStorage) {
         self.storage = storage
     }
 
     /// The standard starting position.
     public init() {
-        var s = GigaBoard.zeroed()
-        gigachess_board_startpos(&s)
+        var s = BoardStorage()
+        s.withMutableGigaBoard { gigachess_board_startpos($0) }
         self.storage = s
     }
 
@@ -90,20 +131,22 @@ public struct Board: Sendable {
 
     /// Empty board, White to move.
     public static func empty() -> Board {
-        var s = GigaBoard.zeroed()
-        gigachess_board_empty(&s)
+        var s = BoardStorage()
+        s.withMutableGigaBoard { gigachess_board_empty($0) }
         return Board(storage: s)
     }
 
     /// Parse a FEN string. Throws `GigaChessError.invalidFen` (with engine
     /// detail when available) instead of trapping.
     public init(fen: String) throws {
-        var s = GigaBoard.zeroed()
+        var s = BoardStorage()
         var detail: String?
         let status: Int32 = fen.withCString { fenPtr in
             withUnsafeTemporaryAllocation(of: CChar.self, capacity: 256) { errBuf in
                 guard let base = errBuf.baseAddress else { return GIGA_E_PANICKED }
-                let st = gigachess_board_from_fen(&s, fenPtr, base, errBuf.count)
+                let st: Int32 = s.withMutableGigaBoard {
+                    gigachess_board_from_fen($0, fenPtr, base, errBuf.count)
+                }
                 if st != GIGA_OK, base.pointee != 0 {
                     detail = String(cString: base)
                 }
@@ -122,36 +165,31 @@ public struct Board: Sendable {
 
     /// Side to move.
     public var turn: Color {
-        var copy = storage
-        let raw = gigachess_board_turn(&copy)
+        let raw = storage.withGigaBoard { gigachess_board_turn($0) }
         return Color(rawValue: raw) ?? .white
     }
 
     /// Piece on a square (0 = a1 … 63 = h8), or nil when empty.
     public func piece(at square: UInt8) -> Piece? {
         precondition(square < 64, "square out of range")
-        var copy = storage
-        let code = gigachess_board_piece_at(&copy, square)
+        let code = storage.withGigaBoard { gigachess_board_piece_at($0, square) }
         if code == 12 { return nil }
         return Piece.fromCode(code)
     }
 
     /// King square for a color.
     public func kingSquare(_ color: Color) -> UInt8 {
-        var copy = storage
-        return gigachess_board_king_square(&copy, color.rawValue)
+        storage.withGigaBoard { gigachess_board_king_square($0, color.rawValue) }
     }
 
     /// Castling-rights bitmask (bit0 WK, bit1 WQ, bit2 BK, bit3 BQ).
     public var castlingRights: UInt8 {
-        var copy = storage
-        return gigachess_board_castling_rights(&copy)
+        storage.withGigaBoard { gigachess_board_castling_rights($0) }
     }
 
     /// En-passant square, or nil when none.
     public var enPassant: UInt8? {
-        var copy = storage
-        let ep = gigachess_board_en_passant(&copy)
+        let ep = storage.withGigaBoard { gigachess_board_en_passant($0) }
         if ep < 0 { return nil }
         return UInt8(ep)
     }
@@ -160,8 +198,7 @@ public struct Board: Sendable {
     public var halfmoveClock: UInt16 {
         var half: UInt16 = 0
         var full: UInt16 = 0
-        var copy = storage
-        gigachess_board_clocks(&copy, &half, &full)
+        storage.withGigaBoard { gigachess_board_clocks($0, &half, &full) }
         return half
     }
 
@@ -169,74 +206,82 @@ public struct Board: Sendable {
     public var fullmoveNumber: UInt16 {
         var half: UInt16 = 0
         var full: UInt16 = 0
-        var copy = storage
-        gigachess_board_clocks(&copy, &half, &full)
+        storage.withGigaBoard { gigachess_board_clocks($0, &half, &full) }
         return full
     }
 
     /// Export FEN (canonical form, incl. EP normalization). Throws only on
     /// engine panic; the 96-byte caller buffer always suffices for valid input.
     public func fen() throws -> String {
-        var copy = storage
-        return try withUnsafeTemporaryAllocation(of: CChar.self, capacity: 128) { buf in
-            guard let base = buf.baseAddress else { throw GigaChessError.enginePanicked }
-            var outLen = 0
-            let status = gigachess_board_to_fen(&copy, base, buf.count, &outLen)
-            if let err = GigaChessError.fromStatus(status) { throw err }
-            return String(cString: base)
+        try storage.withGigaBoard { boardPtr in
+            try withUnsafeTemporaryAllocation(of: CChar.self, capacity: 128) { buf in
+                guard let base = buf.baseAddress else { throw GigaChessError.enginePanicked }
+                var outLen = 0
+                let status = gigachess_board_to_fen(boardPtr, base, buf.count, &outLen)
+                if let err = GigaChessError.fromStatus(status) { throw err }
+                return String(cString: base)
+            }
         }
     }
 
     /// True when the side to move is in check.
     public var isCheck: Bool {
-        var copy = storage
-        return gigachess_board_in_check(&copy) != 0
+        storage.withGigaBoard { gigachess_board_in_check($0) != 0 }
     }
 
     /// True when the side to move is checkmated (in check, no legal moves).
     /// Zero-alloc: asks the engine for the move count without materializing moves.
     public var isCheckmate: Bool {
         guard isCheck else { return false }
-        var copy = storage
-        return gigachess_board_legal_moves(&copy, nil, 0) == 0
+        return storage.withGigaBoard { gigachess_board_legal_moves($0, nil, 0) == 0 }
     }
 
     /// True on stalemate (no legal moves, not in check). Zero-alloc.
     public var isStalemate: Bool {
         guard !isCheck else { return false }
-        var copy = storage
-        return gigachess_board_legal_moves(&copy, nil, 0) == 0
+        return storage.withGigaBoard { gigachess_board_legal_moves($0, nil, 0) == 0 }
     }
 
     // MARK: - Movegen
 
     /// True when the move is legal in this position.
     public func isLegal(_ move: Move) -> Bool {
-        var copy = storage
-        return gigachess_board_is_legal(&copy, move.word) != 0
+        storage.withGigaBoard { gigachess_board_is_legal($0, move.word) != 0 }
     }
 
     /// Play a legal move, returning its Undo token. Throws
     /// `GigaChessError.illegalMove` with the board unchanged on illegal input.
     @discardableResult
     public mutating func play(_ move: Move) throws -> Undo {
-        var undoStorage = GigaUndo.zeroed()
-        let status = gigachess_board_play(&storage, move.word, &undoStorage)
+        var undoStorage = UndoStorage()
+        let status = storage.withMutableGigaBoard { boardPtr in
+            undoStorage.withMutableGigaUndo { undoPtr in
+                gigachess_board_play(boardPtr, move.word, undoPtr)
+            }
+        }
         if let err = GigaChessError.fromStatus(status) { throw err }
         return Undo(storage: undoStorage)
     }
 
     /// Unchecked make for search (caller guarantees legality).
     public mutating func makeMoveUnchecked(_ move: Move) -> Undo {
-        var undoStorage = GigaUndo.zeroed()
-        gigachess_board_make_unchecked(&storage, move.word, &undoStorage)
+        var undoStorage = UndoStorage()
+        storage.withMutableGigaBoard { boardPtr in
+            undoStorage.withMutableGigaUndo { undoPtr in
+                gigachess_board_make_unchecked(boardPtr, move.word, undoPtr)
+            }
+        }
         return Undo(storage: undoStorage)
     }
 
     /// Unmake a move made with `play` or `makeMoveUnchecked`.
     public mutating func unmake(_ move: Move, undo: Undo) {
         var undoCopy = undo.storage
-        gigachess_board_unmake(&storage, move.word, &undoCopy)
+        storage.withMutableGigaBoard { boardPtr in
+            undoCopy.withGigaUndo { undoPtr in
+                gigachess_board_unmake(boardPtr, move.word, undoPtr)
+            }
+        }
     }
 
     /// Hot-path visitor: enumerates legal moves with no Swift heap allocation
@@ -246,8 +291,7 @@ public struct Board: Sendable {
             guard let base = words.baseAddress else {
                 return try body(UnsafeBufferPointer(start: nil, count: 0))
             }
-            var copy = storage
-            let count = gigachess_board_legal_moves(&copy, base, words.count)
+            let count: Int = storage.withGigaBoard { gigachess_board_legal_moves($0, base, words.count) }
             let n = min(count, words.count)
             return try base.withMemoryRebound(to: Move.self, capacity: n) { moveBase in
                 let buf = UnsafeBufferPointer(start: moveBase, count: n)
@@ -264,8 +308,7 @@ public struct Board: Sendable {
 
     /// Perft node count (identical to native Rust perft at every depth).
     public func perft(depth: UInt32) -> UInt64 {
-        var copy = storage
-        return gigachess_board_perft(&copy, depth)
+        storage.withGigaBoard { gigachess_board_perft($0, depth) }
     }
 }
 

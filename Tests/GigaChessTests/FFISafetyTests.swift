@@ -8,6 +8,11 @@ final class FFISafetyTests: XCTestCase {
     func testBoardSizeAndOffsets() {
         XCTAssertEqual(MemoryLayout<GigaBoard>.size, 144)
         XCTAssertEqual(MemoryLayout<GigaUndo>.size, 24)
+        // Swift-owned mirrors must stay layout-identical (checked Sendable
+        // depends on it for sound bridging, no @unchecked anywhere).
+        XCTAssertEqual(MemoryLayout<BoardStorage>.size, MemoryLayout<GigaBoard>.size)
+        XCTAssertEqual(MemoryLayout<UndoStorage>.size, MemoryLayout<GigaUndo>.size)
+        XCTAssertEqual(MemoryLayout<BoardStorage>.alignment, 8)
         XCTAssertEqual(gigachess_board_size_assert(), GIGA_OK)
     }
 
@@ -40,11 +45,15 @@ final class FFISafetyTests: XCTestCase {
     func testAllFFISymbolsPresent() {
         // If any of these fail to link, the 1:1 header↔Rust audit drifted.
         XCTAssertEqual(gigachess_board_size_assert(), 0)
-        var b = GigaBoard.zeroed()
-        gigachess_board_startpos(&b)
-        XCTAssertEqual(gigachess_board_turn(&b), 1)
-        XCTAssertEqual(gigachess_board_legal_moves(&b, nil, 0), 20)
-        XCTAssertEqual(gigachess_board_zobrist(&b), ZobristTests.expectedStartposKey)
-        XCTAssertEqual(gigachess_board_perft(&b, 1), 20)
+        var s = BoardStorage()
+        s.withMutableGigaBoard { gigachess_board_startpos($0) }
+        let turn: UInt8 = s.withGigaBoard { gigachess_board_turn($0) }
+        XCTAssertEqual(turn, 1)
+        let n: Int = s.withGigaBoard { gigachess_board_legal_moves($0, nil, 0) }
+        XCTAssertEqual(n, 20)
+        let key: UInt64 = s.withGigaBoard { gigachess_board_zobrist($0) }
+        XCTAssertEqual(key, ZobristTests.expectedStartposKey)
+        let perft: UInt64 = s.withGigaBoard { gigachess_board_perft($0, 1) }
+        XCTAssertEqual(perft, 20)
     }
 }

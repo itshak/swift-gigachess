@@ -11,7 +11,6 @@ extension Board {
     /// Single FFI call returning a value type — safe in search hot loops.
     /// Make/unmake restores the key bit-exactly.
     public var zobrist: UInt64 {
-        var copy = storage
-        return gigachess_board_zobrist(&copy)
+        storage.withGigaBoard { gigachess_board_zobrist($0) }
     }
 }

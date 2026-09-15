@@ -31,7 +31,7 @@ Existing Swift chess libraries (ChessKit) reimplement movegen in pure Swift. We 
 
 ### Decision 2: Board as a Swift value struct (not an opaque pointer)
 
-**Choice:** `Board` is a Swift `struct` holding opaque 144-byte caller-owned storage (`GigaBoard`, same size as the `Copy` Rust board). Transfer is byte copies via pointer — never a language-level struct value — so copying a board is still a bit-for-bit snapshot for search stacks, exactly how the Rust engine itself is used, with zero field-offset coupling.
+**Choice:** `Board` is a Swift `struct` holding Swift-owned 144-byte storage (`BoardStorage`: 18 × `UInt64`, layout-identical to the `Copy` Rust board). Every FFI call bridges through scoped pointer rebinding (`withGigaBoard`), so transfer is byte copies — never a language-level struct value — and copying stays a bit-for-bit snapshot with zero field-offset coupling. Because the storage type is declared in Swift, `Sendable` holds by compiler checking; no `@unchecked` or retroactive conformance on the imported C types is needed (or allowed — CI fails on either).
 
 **Rationale:** The engine's own architecture (ADR-013, close-gap D3) centers on a small `Copy` board with zero-allocation movegen. An opaque-pointer class would add `malloc`/`free` per position, a pointer chase per call, and an `@unchecked Sendable` lie on a mutable handle. The value struct is faster, truly `Sendable`, and gives snapshot semantics for free (undo = keep the old struct).
 
