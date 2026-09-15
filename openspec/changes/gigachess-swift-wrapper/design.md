@@ -1,20 +1,21 @@
 ## Context
 
-The `gigachess` Rust crate provides bitboard-based chess move generation. This package wraps it for Swift via raw C-ABI FFI. See proposal.md for motivation.
+The `gigachess` Rust crate (`turbochess-rs`, v0.1.2, MIT) provides bitboard-based chess move generation with a native API: `Board` (a `Copy`, `#[repr(C)]` ~144-byte struct), `Move(u16)` (Move2 wire format), `Undo`, plus `san`, `fen`, `zobrist`, `replay`, and `database` (moves2 codec) modules. There is additionally a `compat::shakmaty` facade, which this package deliberately does NOT wrap (ADR-015: native-only API).
 
-Existing Swift chess libraries (ChessKit) use pure Swift bitboards. We deliberately avoid rewriting engine logic in Swift — Rust is 2-5% faster due to no ARC overhead and stronger aliasing guarantees. The FFI overhead (~1ns per call via C-ABI) is negligible.
+Existing Swift chess libraries (ChessKit) reimplement movegen in pure Swift. We deliberately avoid that — the wrapper is thin by design: same functions, Swift spelling, zero engine logic reimplementation.
 
 ## Goals / Non-Goals
 
 **Goals:**
-- ~1ns FFI call overhead (raw C-ABI, no UniFFI)
-- Memory-safe lifecycle management (Rust allocation freed in Swift `deinit`)
-- Idiomatic Swift API (`Position`, `Move` as value type, `Sendable` conformance)
-- Automated build pipeline (Rust → XCFramework → SPM)
+- 1:1 Swift access to the native `gigachess` API (no subset, no compat shims)
+- Zero heap allocation in hot paths (stack buffers, visitor enumeration, value-type board)
+- True `Sendable` value semantics (`Board` struct, Swift 6 strict concurrency clean)
+- Automated build pipeline (Rust → XCFramework Release asset → SPM) with version-sync CI
 
 **Non-Goals:**
-- PGN parsing (future change)
-- UCI protocol support (out of scope — use Chessblazer for that)
+- `shakmaty` compatibility facade (out of scope — native API only, per ADR-015)
+- Full PGN tag parsing (movetext ↔ moves2 codec only; tags stay app-level)
+- UCI protocol / Stockfish embedding (separate backend-slice decision)
 - Android/Kotlin bindings (separate project)
 - Pure Swift fallback (no Rust → no package — it's a wrapper)
 
@@ -22,40 +23,63 @@ Existing Swift chess libraries (ChessKit) use pure Swift bitboards. We deliberat
 
 ### Decision 1: Raw C-ABI over UniFFI
 
-**Choice:** `#[no_mangle] extern "C"` functions with a C bridging header.
+**Choice:** `extern "C"` functions with a C bridging header (new `ffi.rs` module in the Rust crate; upstream contribution or pinned patch, version-recorded).
 
-**Rationale:** UniFFI adds ~1,400ns per call due to serialization and mutex-based handle maps. For bulk analysis (perft, engine search with millions of calls), this is a 1,400× overhead. Raw C-ABI compiles to a single `bl` instruction.
+**Rationale:** UniFFI adds serialization + handle-map overhead per call. For bulk analysis (perft, search, batch replay with millions of calls) raw C-ABI compiles to a direct call. The glue cost (~50 lines Rust + ~15 lines C header + thin Swift) is minimal and stays in sync via CI.
 
-**Alternative considered:** UniFFI — rejected for performance. The ergonomic cost of writing ~50 lines of Rust glue + ~15 lines of C header + ~40 lines of Swift wrapper is minimal.
+**Alternative considered:** UniFFI — rejected for per-call overhead and because our types are already FFI-friendly (`u16` moves, `u64` hashes, `#[repr(C)]` board).
 
-### Decision 2: Opaque pointer handle (not value copy)
+### Decision 2: Board as a Swift value struct (not an opaque pointer)
 
-**Choice:** `Position` is a `final class` holding an `OpaquePointer` to a heap-allocated Rust `Box<Position>`.
+**Choice:** `Board` is a Swift `struct` holding the Rust board **by value** (144-byte `#[repr(C)]` struct, `Copy` on the Rust side). Copying a board is a bit-for-bit snapshot for search stacks — exactly how the Rust engine itself is used.
 
-**Rationale:** Chess positions contain substantial state (bitboards, history, castling rights). Copying across FFI on every access would be expensive. An opaque pointer means Swift owns the lifetime (via `deinit`) but Rust owns the memory.
+**Rationale:** The engine's own architecture (ADR-013, close-gap D3) centers on a small `Copy` board with zero-allocation movegen. An opaque-pointer class would add `malloc`/`free` per position, a pointer chase per call, and an `@unchecked Sendable` lie on a mutable handle. The value struct is faster, truly `Sendable`, and gives snapshot semantics for free (undo = keep the old struct).
 
-**Alternative considered:** `#[repr(C)]` struct that Swift sees as a value type — rejected because the Rust `Position` struct layout is complex and may change between engine versions. Opaque pointer provides ABI stability.
+**Alternative considered:** Opaque pointer + `final class` + `deinit` free — rejected: slower, heap-dependent, concurrency-hostile. There is no Rust allocation to free in this design, so the entire memory-safety section of the old spec collapses to "don't hold stale pointers across calls," enforced by value semantics.
+
+**Drift guard:** a layout test asserts `BOARD_SIZE` and field offsets against the pinned `gigachess` version; CI fails the build on mismatch so struct drift is caught, not shipped.
 
 ### Decision 3: Move as packed UInt16 value type
 
-**Choice:** `Move` is a Swift `struct` wrapping a `UInt16` (6 bits from, 6 bits to, 4 bits promotion).
+**Choice:** `Move` is a Swift `struct` wrapping a `UInt16` (`from | (to << 6) | (promo << 12)`; promo 0 = none, 1 = N, 2 = B, 3 = R, 4 = Q) — bit-identical to Rust `Move(u16)` and the moves2 database format.
 
-**Rationale:** Zero-copy transfer across FFI — a `UInt16` fits in a register. No heap allocation, no ARC. Moves are `Hashable`, `Equatable`, `Sendable` for free.
+**Rationale:** Zero-copy transfer across FFI in a register. `Hashable`, `Equatable`, `Sendable` for free. Moves stored in BlindBase databases (`moves2` blobs) decode with a single `Move(word:)` init. Castling is king-captures-rook (`e1h1`/`e1a1`/`e8h8`/`e8a8`), matching both the Rust engine and `gigaboard`.
 
-### Decision 4: Caller-owned buffers for string/array data
+### Decision 4: Bulk enumeration, not per-call arrays
 
-**Choice:** FEN export and legal move listing write into caller-provided buffers (`UnsafeMutablePointer`).
+**Choice:** Two movegen APIs: (a) `withLegalMoves(_:)` visitor closure filling a caller buffer (hot path, zero alloc); (b) convenience `legalMoves() -> [Move]` (cold path, allocates). Perft parity with Rust numbers is a release gate.
 
-**Rationale:** Avoids Rust allocating strings that Swift must free (error-prone). The caller allocates a stack buffer, Rust writes into it, Swift reads it. No shared ownership.
+**Rationale:** A per-call `[Move]` array alloc dominates the ~nanosecond FFI cost and would make the "1ns overhead" claim meaningless. The visitor mirrors Rust's `generate_visitor` / `MoveSink` design instead of fighting it.
 
-### Decision 5: XCFramework with committed binary
+### Decision 5: Caller-owned buffers + C error codes for strings/fallible ops
 
-**Choice:** Pre-built `.xcframework` committed to the Git repo (or distributed as GitHub Release asset).
+**Choice:** FEN export and SAN rendering write into caller-provided stack buffers (`UnsafeMutableBufferPointer`; FEN ≤ 96 bytes, SAN ≤ 12 bytes `ArrayString` equivalent). Fallible Rust ops (`parse_fen`, `san_to_move`) return C error codes + optional message buffer; Swift surfaces them as `throws` with a `GigaChessError` enum. No Rust-allocated string ever crosses the boundary.
 
-**Rationale:** Consumers don't need Rust toolchain installed. SPM resolves, links, done. For large binaries, GitHub Release URL + checksum in `binaryTarget` keeps the repo lean.
+**Rationale:** No shared ownership, no cross-language free, no leaks by construction. Matches the engine's no-alloc policy end to end.
+
+### Decision 6: Zobrist and moves2 codec cross FFI as plain data
+
+**Choice:** `zobrist()` returns `UInt64` by value (Polyglot key, incrementally maintained). Moves2 codec functions (`parse_movetext_to_moves2`, `moves2_to_san_movetext`, `replay_moves2_stream`/`batch`) operate on contiguous `UInt16` buffers with flat outcome structs — `HashMap`-returning helpers (e.g. `position_stats`) stay Rust-side; if Swift needs them later they get a flattened batch API, not a hash map across FFI.
+
+**Rationale:** Everything crossing the boundary is `Copy`: words, hashes, counts. This is what makes the 4.4× batch-search speedup reachable from Swift.
+
+### Decision 7: Panic policy — catch_unwind at every boundary
+
+**Choice:** Every `extern "C"` entry point wraps its body in `catch_unwind` and converts panics to error codes. The Rust profile uses `panic = "abort"`, so an uncaught panic across FFI would kill the host app.
+
+**Rationale:** A chess library must never crash its host. Verified by a test that feeds adversarial inputs (garbage FEN, truncated buffers) under all entry points.
+
+### Decision 8: XCFramework as Release asset + version-sync CI
+
+**Choice:** Prebuilt `.xcframework` distributed as a GitHub Release asset with checksum pinned in SPM `binaryTarget` (repo stays lean). CI rebuilds the XCFramework whenever the pinned `gigachess` version changes; the pin (crates.io version or crate hash) is recorded in `scripts/build-xcframework.sh` and in this spec.
+
+**Rationale:** Consumers need no Rust toolchain. Version skew between Swift wrapper and engine is the #1 drift risk — CI, not discipline, prevents it.
+
+**Targets:** `aarch64-apple-ios`, `aarch64-apple-ios-sim`, `aarch64-apple-darwin`. x86_64 macOS slice added on demand (decision recorded; Apple Silicon is the tier-1 desktop target).
 
 ## Risks / Trade-offs
 
-- **ABI stability**: If the Rust `Position` struct changes layout, the xcframework must be rebuilt. Opaque pointer insulates Swift from this, but the C header must stay in sync. → Mitigated by CI that rebuilds xcframework on Rust crate changes.
-- **Rust toolchain dependency**: Building the xcframework requires `rustup` with Apple targets. → Mitigated by pre-building and committing/releasing the xcframework.
-- **Thread safety**: `Position` is `@unchecked Sendable` — the Rust side is NOT thread-safe (mutable state). Concurrent mutation is undefined behavior. → Document clearly; consider adding a `LockedPosition` wrapper in a future change.
+- **Struct layout drift**: Rust `Board` internals may change between engine versions. → Mitigated by `BOARD_SIZE`/offset assert test + version-sync CI (Decision 2, 8).
+- **FFI surface growth**: full native mirror means more entry points than a minimal wrapper. → Mitigated by 1:1 naming with Rust (`board_play`, `board_legal_moves`, …) so audits are mechanical.
+- **Swift 6 strict concurrency**: new requirement vs old `@unchecked Sendable` plan. → Value semantics make this free; CI builds with Swift 6 mode to keep it that way.
+- **Upstream dependency**: `ffi.rs` ideally lives upstream in `gigachess-rs`; until merged, a pinned patch/vendor copy with recorded hash. → Track upstream PR in tasks.

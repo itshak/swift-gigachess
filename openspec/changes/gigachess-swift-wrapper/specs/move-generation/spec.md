@@ -1,10 +1,10 @@
 ## Purpose
-Legal move generation, move application, and game state detection for chess positions.
+Legal move generation, move application (play, make/unmake), bulk enumeration, perft, and game state detection — mirroring the native `Board` movegen API with zero-allocation hot paths.
 
 ## ADDED Requirements
 
 ### Requirement: Legal Move Generation
-The library MUST generate all legal moves for the current position.
+The library MUST generate all legal moves for the current position, mirroring native `legal_moves()`.
 
 #### Scenario: Starting position
 - **WHEN** legal moves are requested for the starting position
@@ -12,33 +12,58 @@ The library MUST generate all legal moves for the current position.
 
 #### Scenario: Move representation
 - **WHEN** a legal move is returned
-- **THEN** it is a value type (`struct Move`) containing source square, destination square, and optional promotion piece
+- **THEN** it is a value type (`struct Move`) wrapping the 16-bit Move2 word (`from | (to << 6) | (promo << 12)`, promo 0 = none, 1 = N, 2 = B, 3 = R, 4 = Q)
+- **THEN** moves expose `from`, `to`, `promotion`, algebraic rendering, and UCI rendering (`e2e4`, `e7e8q`)
 - **THEN** moves are `Hashable`, `Equatable`, and `Sendable`
 
+#### Scenario: Castling encoding
+- **WHEN** a castling move is generated
+- **THEN** it uses native king-captures-rook encoding (`e1h1`, `e1a1`, `e8h8`, `e8a8`) — identical to the Rust engine and `gigaboard` wire format
+
+### Requirement: Bulk Enumeration Without Allocation
+The library MUST provide a visitor/buffer-fill API (mirroring native `generate_visitor` / `MoveSink`) for hot paths, in addition to the allocating convenience API.
+
+#### Scenario: Visitor path allocates nothing
+- **WHEN** legal moves are enumerated via `withLegalMoves(_:)` (or buffer-fill variant)
+- **THEN** no Swift heap allocation occurs per call (caller-provided stack buffer of at least `MAX_MOVES` = 256 words)
+
+#### Scenario: Convenience path
+- **WHEN** `legalMoves()` is called
+- **THEN** it returns `[Move]` (allocating) and is documented as the cold-path API
+
 ### Requirement: Move Application
-The library MUST support applying moves to mutate the position.
+The library MUST support `play` (failable, legality-checked, mirroring native `play() -> Result<Undo, IllegalMove>`), `isLegal` checks, and explicit make/unmake with `Undo` tokens for search.
 
 #### Scenario: Apply legal move
-- **WHEN** a legal move is applied to a position
-- **THEN** the position is updated to reflect the move
-- **THEN** the method returns `true`
+- **WHEN** a legal move is played on a (mutable) board
+- **THEN** the board is updated and an `Undo` token is returned
 
 #### Scenario: Apply illegal move
-- **WHEN** an illegal move is applied to a position
-- **THEN** the position is unchanged
-- **THEN** the method returns `false`
+- **WHEN** an illegal move is played
+- **THEN** the board is unchanged and a `GigaChessError.illegalMove` is thrown
+
+#### Scenario: Make/unmake round-trip
+- **WHEN** a move is made with `makeMoveUnchecked` and then unmade with its `Undo` token
+- **THEN** the board is bit-identical to its pre-move state (hash included)
+
+### Requirement: Perft Parity
+The library MUST expose perft counting with results identical to native Rust perft at every depth.
+
+#### Scenario: Known perft values
+- **WHEN** perft is run from the starting position
+- **THEN** node counts match the canonical values (e.g. depth 1 = 20, depth 2 = 400, depth 3 = 8902)
 
 ### Requirement: Game State Detection
-The library MUST detect check, checkmate, and stalemate.
+The library MUST detect check, checkmate, and stalemate from native state (`in_check` + legal move count).
 
 #### Scenario: Check detection
 - **WHEN** the current side's king is in check
 - **THEN** `isCheck` returns `true`
 
 #### Scenario: Checkmate detection
-- **WHEN** the current side is in checkmate
+- **WHEN** the current side is in checkmate (e.g. scholar's mate / fool's mate)
 - **THEN** `isCheckmate` returns `true`
-- **THEN** `legalMoves()` returns an empty array
+- **THEN** legal move enumeration yields zero moves
 
 #### Scenario: Stalemate detection
 - **WHEN** the current side has no legal moves but is not in check
