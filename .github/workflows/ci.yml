@@ -21,9 +21,7 @@ jobs:
       - name: FFI unit tests (layout guard, perft gate, adversarial inputs)
         run: cargo test --release --manifest-path rust/Cargo.toml
       - name: Layout-drift guard (BOARD_SIZE / UNDO_SIZE)
-        run: |
-          test "$(cargo run --quiet --manifest-path /tmp/opencode/size-check/Cargo.toml 2>/dev/null | grep BOARD_SIZE || echo BOARD_SIZE=144)" = "BOARD_SIZE=144" || true
-          cargo test --release --manifest-path rust/Cargo.toml layout_contract_holds -- --nocapture
+        run: cargo test --release --manifest-path rust/Cargo.toml layout_contract_holds -- --nocapture
       - name: FFI symbol presence check (header ↔ Rust 1:1)
         run: |
           python3 - <<'EOF'
@@ -51,10 +49,31 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_16.app/Contents/Developer || true
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Select newest Xcode (Swift 6+ required)
+        run: |
+          echo "Available Xcodes:"
+          ls -d /Applications/Xcode*.app 2>/dev/null || true
+          LATEST="$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)"
+          if [ -z "$LATEST" ]; then echo "error: no Xcode found" >&2; exit 1; fi
+          echo "Selecting $LATEST"
+          sudo xcode-select -s "$LATEST/Contents/Developer"
+          xcodebuild -version
+          swift --version
+      - name: Assert Swift 6 toolchain
+        run: |
+          SWIFT_VER="$(swift --version 2>&1 | grep -oE 'Apple Swift version [0-9]+\.[0-9]+' | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+          echo "Detected Swift $SWIFT_VER"
+          if [ -z "$SWIFT_VER" ]; then echo "error: could not parse Swift version" >&2; exit 1; fi
+          test "${SWIFT_VER%%.*}" -ge 6 || { echo "error: Swift 6+ required (Package.swift uses tools-version 6.0), got $SWIFT_VER" >&2; exit 1; }
       - name: Build XCFramework from pin (or download Release asset)
         run: ./scripts/build-xcframework.sh
+      - name: Upload XCFramework build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CGigaChessFFI-xcframework
+          path: Frameworks/CGigaChessFFI.xcframework.zip
+          retention-days: 30
       - name: Swift build (Swift 6 mode, zero warnings)
         run: swift build -v
       - name: Swift test (parity suite + perft gate)
