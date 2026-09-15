@@ -1,0 +1,58 @@
+schema: spec-driven
+
+# Project context — shown to AI when creating artifacts
+context: |
+  GigaChess (Swift) is a Swift Package Manager library that wraps the `gigachess` Rust chess engine
+  via raw C-ABI FFI (`extern "C"`) for maximum performance (~1ns call overhead).
+
+  It provides a clean, idiomatic Swift API for chess move generation, validation, FEN/PGN parsing,
+  and position evaluation — backed by Rust's bitboard engine underneath.
+
+  Architecture:
+  - Rust `gigachess` crate compiled as `staticlib` for Apple targets (iOS arm64, iOS Simulator, macOS)
+  - C bridging header + module.modulemap exposing the FFI surface
+  - XCFramework packaging (`CGigaChessFFI.xcframework`) for SPM binary target
+  - Pure Swift wrapper layer (`GigaChess` module) providing idiomatic API
+
+  Related projects:
+  - `gigachess` (Rust crate): the upstream chess engine (bitboard-based, MIT)
+  - `gigaboard` (npm): React chessboard UI (MIT)
+  - `swift-gigaboard`: Native Swift chessboard UI (companion project)
+
+  Stack: Swift 5.9+, SPM, Rust (staticlib), C-ABI FFI, XCFramework
+  Platforms: iOS 16+, macOS 13+
+  License: MIT
+  Repo: github.com/itshak/swift-gigachess
+
+# Per-artifact rules
+rules:
+  proposal:
+    - Keep proposals focused on a single feature or fix
+    - Note FFI boundary design decisions explicitly
+    - Note memory safety considerations at the Rust↔Swift boundary
+  specs:
+    - Every public API must include Swift DocC documentation requirements
+    - Use Given/When/Then scenarios for testable behavior
+    - Include thread safety requirements (Sendable conformance)
+    - Specify which types are value types (struct) vs reference types (class)
+  design:
+    - Reference the C-ABI FFI architecture for all Rust↔Swift boundary decisions
+    - All dependencies must be MIT/Apache-2.0/ISC licensed
+    - Include memory management design (who owns what across FFI boundary)
+    - Include build pipeline design (Cargo targets, XCFramework creation)
+  tasks:
+    - Each task should be completable in one coding session
+    - Include verification steps (swift build, swift test) in the final task
+    - Separate Rust-side and Swift-side tasks clearly
+
+# Per-operation guidance
+operations:
+  apply:
+    guidance:
+      - Always prefix git commit messages with the change ID in brackets
+      - Run `swift build` and `swift test` after implementation
+      - Verify FFI boundary safety (no dangling pointers, proper cleanup in deinit)
+      - Test on both iOS Simulator and macOS targets
+  archive:
+    guidance:
+      - Summarize FFI design decisions and performance characteristics in archive notes
