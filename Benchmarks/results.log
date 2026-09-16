@@ -1,0 +1,36 @@
+# Benchmark results log (committed, transcribed from green bench runs)
+
+## 2026-09-15 — run 35038585769, commit 073db63, macos-14 (arm64)
+
+Parity harness: Rust criterion `ffi_parity` vs Swift `GigaBenchmarks`,
+same job, identical deterministic corpora
+(games=40, plies=4000, xor=27715, line48_xor=3971 — asserted equal by CI).
+
+| workload | native Rust | Swift wrapper | Swift/native |
+|---|---|---|---|
+| perft d5 (4.87M nodes) | 12.32 ms (395 Mnps) | 10.92 ms (445 Mnps) | 0.89x |
+| movegen fill | 112.3 ns | 142.7 ns | 1.27x |
+| 48-ply make/unmake | 26.6 ns | 22.1 ns | 0.83x |
+| SAN render x48 | 58.2 ns | 107.6 ns | 1.85x |
+| zobrist read | 8.7 ns | 2.6 ns | 0.30x |
+| parse 40 games | 11.6 us | 10.0 us | 0.86x |
+| export 40 games | 14.1 us | 15.9 us | 1.13x |
+| replay 40 games | 3.6 us | 3.4 us | 0.94x |
+
+Notes (read before quoting ratios):
+- Shared CI runners are noisy; treat ratios as indicative. Both columns are
+  medians from one job (criterion n=15 vs Swift medians of 3–5000 rounds).
+- Ratios < 1.0 are noise/methodology, not superiority (notably perft, where
+  Swift takes the median of only 3 rounds).
+- `zobrist` Swift row is an optimizer artifact: the loop XORs a loop-invariant
+  load an even number of times, which the compiler can fold away. The Rust
+  side pins its load with black_box. Treat 2.6 ns as a lower bound, not a
+  measurement. Macro rows (perft/codec, µs–ms scale, FFI-opaque) are robust.
+- `san_48` shows the one real, explainable gap (~1.85x): Swift converts each
+  render through `String(cString:)` (copy + validation) where Rust keeps the
+  `ArrayString<12>` on the stack. Cold-path cost, documented in code.
+- `movegen_fill` ~1.27x covers the `withLegalMoves` closure + pointer-rebind
+  layer over the raw FFI fill.
+- Bottom line: wrapper overhead is lost in engine noise on every workload
+  that matters (movegen, play/unmake, codec, replay, perft all within
+  ~0.8–1.3x); the ~1ns/call FFI claim is consistent with these results.
