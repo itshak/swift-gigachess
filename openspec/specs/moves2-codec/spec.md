@@ -54,7 +54,8 @@ All codec/replay traffic MUST cross FFI as contiguous `UInt16`/`UInt64` buffers 
 #### Scenario: Throughput benchmarks
 - **GIVEN** a codec throughput measurement
 - **WHEN** it runs
-- **THEN** `PerformanceTests` perft/codec `measure` blocks run under `swift test` and first numbers vs native Rust are recorded in `Benchmarks/README.md` (informative comparison, no hard CI threshold)
+- **THEN** `PerformanceTests` perft/codec `measure` blocks run under `swift test`, and the `bench` workflow additionally runs Rust criterion (`ffi_parity`) against Swift (`GigaBenchmarks`) on identical seeded corpora with a joined comparison table (informative, no hard CI threshold)
+- **THEN** first numbers vs native Rust are recorded in `Benchmarks/README.md` and `Benchmarks/results.log`
 
 ### Requirement: API Documentation
 All public API in this capability SHALL carry Swift DocC documentation. This capability exposes functions only and introduces no new types.

@@ -44,5 +44,13 @@ let package = Package(
                 .swiftLanguageMode(.v6),
             ]
         ),
+        // Parity benchmark harness (release only, not shipped to consumers).
+        .executableTarget(
+            name: "GigaBenchmarks",
+            dependencies: ["GigaChess"],
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+            ]
+        ),
     ]
 )

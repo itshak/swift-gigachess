@@ -14,6 +14,13 @@ crate-type = ["staticlib", "rlib"]
 [dependencies]
 gigachess = "=0.1.2"
 
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "ffi_parity"
+harness = false
+
 [features]
 default = ["std"]
 std = ["gigachess/std"]

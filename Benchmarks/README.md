@@ -1,17 +1,35 @@
 # Benchmarks
 
-Informative throughput numbers for `swift-gigachess` vs native Rust `gigachess 0.1.2`.
-CI runs `PerformanceTests` (`swift test`) as a regression gate on codec
-throughput (completeness + order-of-magnitude), not nanosecond parity.
+Throughput comparison for `swift-gigachess` vs native Rust `gigachess 0.1.2`,
+measured on one machine over identical deterministic corpora.
 
-## Method
+## Parity harness (authoritative)
 
-- Rust baseline: `cargo bench` in `gigachess-rs` (`benches/perft_bench.rs`,
-  `benches/codec_bench.rs`, `benches/replay_bench.rs`).
-- Swift: `swift test --filter PerformanceTests` on macOS (M-series, release).
-- Visitor hot path (`withLegalMoves`) is zero-alloc by construction (caller
-  stack buffer, 256 words); `legalMoves()` is the documented allocating
-  cold-path API.
+Two harnesses measure the same workloads on the same corpus:
+
+- **Rust:** `cargo bench --bench ffi_parity --manifest-path rust/Cargo.toml`
+  (criterion 0.5) — every timed call goes through the real `extern "C"`
+  entries, i.e. the exact path Swift calls into, plus native references
+  (`perft_d5_native`, `codec_replay_native`).
+- **Swift:** `swift run -c release GigaBenchmarks` — median wall times over
+  repeated rounds, printed as `RESULT <name>=<milliseconds>` lines.
+
+Both generate the same corpus independently (xorshift seed
+`0xBE11_0000_C0DE_0001`, 40 games × ≤100 plies, checked plays, `"*"`
+render — mirroring gigachess `codec_bench.rs`) plus a 48-ply line
+(seed `0x1234_5678_9ABC_DEF0`). Each side prints corpus fingerprints
+(plies, word-xor, line-xor); `scripts/compare-bench.py` refuses to compare
+unless they match exactly.
+
+`bench.yml` runs both on macOS, joins them into one table (Swift/native
+ratios), and uploads the raw logs. Ratios are indicative — shared CI
+runners are noisy — and never gate: the compare step fails only on corpus
+mismatch or missing rows.
+
+## Official numbers
+
+`Benchmarks/results.log` holds numbers transcribed from green `bench` runs
+(committed). The table below tracks the latest transcription.
 
 ## First numbers (pinned engine 0.1.2)
 
@@ -24,15 +42,17 @@ throughput (completeness + order-of-magnitude), not nanosecond parity.
 | replay 33-ply → 34 hashes | ~5 µs | ~6–10 µs | incremental, no SAN |
 
 Raw FFI call overhead is ~1ns (direct `extern "C"` call, no serialization);
-bulk workloads are movegen/SAN-bound, so Swift достичь parity within noise +
+bulk workloads are movegen/SAN-bound, so Swift lands within noise plus the
 copy of the 144-byte board per call (memcpy, ~2ns).
 
 ## Reproducing
 
 ```bash
-./scripts/build-xcframework.sh
-swift test --filter PerformanceTests
-cargo test --release --manifest-path rust/Cargo.toml
+cargo bench --bench ffi_parity --manifest-path rust/Cargo.toml
+swift run -c release GigaBenchmarks
+python3 scripts/compare-bench.py /tmp/rust-bench.log /tmp/swift-bench.log
 ```
 
-Results are appended to `Benchmarks/results.log` by CI (not committed).
+`swift test --filter PerformanceTests` remains the lightweight CI smoke
+(order-of-magnitude, not nanosecond parity). Transcribe new official
+numbers to `Benchmarks/results.log` (committed) after green `bench` runs.
