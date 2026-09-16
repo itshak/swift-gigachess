@@ -15,6 +15,12 @@ on:
       - '.github/workflows/bench.yml'
   workflow_dispatch:
 
+# Fail a step if ANY command in a pipeline fails — without this, `cmd | tee`
+# masks cmd's exit code behind tee's success and green verdicts lie.
+defaults:
+  run:
+    shell: bash -e -o pipefail {0}
+
 jobs:
   parity:
     name: Swift-vs-native parity benches (macOS)
@@ -27,7 +33,7 @@ jobs:
         run: |
           echo "Available Xcodes:"
           ls -d /Applications/Xcode*.app 2>/dev/null || true
-          LATEST="$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)"
+          LATEST="$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1 || true)"
           if [ -z "$LATEST" ]; then echo "error: no Xcode found" >&2; exit 1; fi
           echo "Selecting $LATEST"
           sudo xcode-select -s "$LATEST/Contents/Developer"
@@ -35,25 +41,33 @@ jobs:
           swift --version
       - name: Assert Swift 6 toolchain
         run: |
-          SWIFT_VER="$(swift --version 2>&1 | grep -oE 'Apple Swift version [0-9]+\.[0-9]+' | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+          SWIFT_VER="$(swift --version 2>&1 | grep -oE 'Apple Swift version [0-9]+\.[0-9]+' | grep -oE '[0-9]+\.[0-9]+' | head -1 || true)"
           echo "Detected Swift $SWIFT_VER"
           if [ -z "$SWIFT_VER" ]; then echo "error: could not parse Swift version" >&2; exit 1; fi
           test "${SWIFT_VER%%.*}" -ge 6 || { echo "error: Swift 6+ required, got $SWIFT_VER" >&2; exit 1; }
       - name: Rust parity benches (criterion)
         run: cargo bench --bench ffi_parity --manifest-path rust/Cargo.toml 2>&1 | tee /tmp/rust-bench.log
+      - name: Build Swift harness (release)
+        run: swift build -c release --product GigaBenchmarks
       - name: Swift parity benches (release)
-        run: swift run -c release GigaBenchmarks 2>&1 | tee /tmp/swift-bench.log
+        run: |
+          BIN="$(swift build -c release --product GigaBenchmarks --show-bin-path)"
+          ls -la "$BIN/GigaBenchmarks"
+          "$BIN/GigaBenchmarks" 2>&1 | tee /tmp/swift-bench.log
+          test -s /tmp/swift-bench.log
       - name: Compare and report
         run: |
           echo "## Parity benches (same machine, identical corpora)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Runner: $(uname -sm), Xcode $(xcodebuild -version | head -1), $(swift --version 2>&1 | grep -oE 'Apple Swift version [0-9.]+')" >> "$GITHUB_STEP_SUMMARY"
+          echo "Runner: $(uname -sm)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           python3 scripts/compare-bench.py /tmp/rust-bench.log /tmp/swift-bench.log --out /tmp/bench-table.md | tee -a "$GITHUB_STEP_SUMMARY"
+          test -s /tmp/bench-table.md
       - name: Upload bench logs
         uses: actions/upload-artifact@v4
         with:
           name: parity-bench-logs
+          if-no-files-found: error
           path: |
             /tmp/rust-bench.log
             /tmp/swift-bench.log

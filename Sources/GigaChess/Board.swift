@@ -291,7 +291,7 @@ public struct Board: Sendable {
 
     /// Unmake a move made with `play` or `makeMoveUnchecked`.
     public mutating func unmake(_ move: Move, undo: Undo) {
-        var undoCopy = undo.storage
+        let undoCopy = undo.storage
         storage.withMutableGigaBoard { boardPtr in
             undoCopy.withGigaUndo { undoPtr in
                 gigachess_board_unmake(boardPtr, move.word, undoPtr)
